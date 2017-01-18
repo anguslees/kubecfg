@@ -1,0 +1,20 @@
+[package]
+name = "kubecfg"
+version = "0.1.0"
+authors = ["Angus Lees <gus@inodes.org>"]
+
+[profile.release]
+panic = "abort"
+
+[dependencies]
+clap = "2.18"
+json = "0.11"
+log = "0.3"
+env_logger = "0.3"
+hyper = "0.9"
+yaml-rust = "0.3"
+error-chain = "0.7"
+
+[dependencies.jsonnet-rs]
+version = "0.5"
+path = "../rust-jsonnet"
