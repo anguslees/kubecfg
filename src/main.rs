@@ -30,15 +30,14 @@ mod kutils;
 
 use clap::{Arg, App, SubCommand, AppSettings, Shell, ArgGroup};
 use jsonnet::{jsonnet_version,JsonnetVm};
+use std::ffi::{OsStr,OsString};
+use std::env;
 
 use errors::*;
 use emitters::OutputFormat;
 use kutils::JsonValueExt;
 
-#[cfg(unix)]
-const JPATH_DELIMITER: &'static str = ":";
-#[cfg(windows)]
-const JPATH_DELIMITER: &'static str = ";";
+const JPATH_ENVVAR: &'static str = "KUBECFG_JPATH";
 
 fn parse_kv(s: &str) -> (&str, &str) {
     match s.find('=') {
@@ -91,7 +90,6 @@ fn build_cli<'a>(version: &'a str) -> App<'a, 'a> {
                          .long("jpath")
                          .value_name("DIR")
                          .multiple(true)
-                         .value_delimiter(JPATH_DELIMITER)
                          .help("Additional jsonnet library search path"))
                     .arg(Arg::with_name("exec")
                          .short("e")
@@ -113,7 +111,6 @@ fn build_cli<'a>(version: &'a str) -> App<'a, 'a> {
                          .long("jpath")
                          .value_name("DIR")
                          .multiple(true)
-                         .value_delimiter(JPATH_DELIMITER)
                          .help("Additional jsonnet library search path"))
                     .arg(Arg::with_name("file")
                          .short("f")
@@ -136,7 +133,13 @@ fn build_cli<'a>(version: &'a str) -> App<'a, 'a> {
                          .help("Input file")))
 }
 
-fn init_vm_options<'a>(vm: &mut JsonnetVm, matches: &::clap::ArgMatches<'a>) {
+fn init_vm_options<'a>(vm: &mut JsonnetVm, env_path: Option<OsString>, matches: &::clap::ArgMatches<'a>) {
+    if let Some(paths) = env_path {
+        for path in env::split_paths(&paths) {
+            vm.jpath_add(path);
+        }
+    }
+
     if let Some(paths) = matches.values_of_os("jpath") {
         for path in paths {
             vm.jpath_add(path);
@@ -189,6 +192,8 @@ fn main_() -> Result<()> {
     env_logger::init()
         .chain_err(|| "Error initialising logging")?;
 
+    let jpath_env = env::var_os(OsStr::new(JPATH_ENVVAR));
+
     let version = format!("{} (jsonnet {})", crate_version!(), jsonnet_version());
     let matches = build_cli(&version).get_matches();
 
@@ -199,7 +204,7 @@ fn main_() -> Result<()> {
 
     } else if let Some(ref matches) = matches.subcommand_matches("show") {
         let mut vm = JsonnetVm::new();
-        init_vm_options(&mut vm, matches);
+        init_vm_options(&mut vm, jpath_env, matches);
 
         let json_text = eval_file_or_snippet(&mut vm, matches)?;
 
@@ -211,7 +216,7 @@ fn main_() -> Result<()> {
 
     } else if let Some(ref matches) = matches.subcommand_matches("create") {
         let mut vm = JsonnetVm::new();
-        init_vm_options(&mut vm, matches);
+        init_vm_options(&mut vm, jpath_env, matches);
 
         let filename = matches.value_of_os("file").unwrap();
         let json = vm.evaluate_file(filename)
