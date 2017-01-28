@@ -13,7 +13,11 @@ impl<'a> fmt::Display for K8sKind<'a> {
 }
 
 const V1_LIST: K8sKind<'static> = K8sKind{api_version: "v1", kind: "List"};
+const V1_NAMESPACE: K8sKind<'static> = K8sKind{api_version: "v1", kind: "Namespace"};
 const V1_SERVICE: K8sKind<'static> = K8sKind{api_version: "v1", kind: "Service"};
+const V1_CONFIGMAP: K8sKind<'static> = K8sKind{api_version: "v1", kind: "ConfigMap"};
+const V1_SECRET: K8sKind<'static> = K8sKind{api_version: "v1", kind: "Secret"};
+const V1_PVC: K8sKind<'static> = K8sKind{api_version: "v1", kind: "PersistentVolumeClaim"};
 
 pub trait JsonValueExt {
     fn is_k8s_kind(&self, kind: K8sKind) -> bool;
@@ -35,6 +39,13 @@ impl JsonValueExt for JsonValue {
     fn k8s_name(&self) -> &JsonValue {
         &self["metadata"]["name"]
     }
+}
+
+fn is_potential_pod_dependency(v: &JsonValue) -> bool {
+    v.is_k8s_kind(V1_SERVICE) ||
+        v.is_k8s_kind(V1_CONFIGMAP) ||
+        v.is_k8s_kind(V1_SECRET) ||
+        v.is_k8s_kind(V1_PVC)
 }
 
 pub enum Operation {
@@ -59,15 +70,15 @@ pub fn sort_for(op: Operation, v: &JsonValue) -> Vec<&JsonValue> {
 
         Operation::Create => {
             enum Rank {
+                First,
                 Early,
                 Normal,
             }
             v.sort_by_key(|item| {
-                if item.is_k8s_kind(V1_SERVICE) {
-                    Rank::Early as u8
-                } else {
-                    Rank::Normal as u8
-                }
+                let rank = if item.is_k8s_kind(V1_NAMESPACE) { Rank::First }
+                else if is_potential_pod_dependency(item) { Rank::Early }
+                else { Rank::Normal };
+                rank as u8
             });
             v
         },
