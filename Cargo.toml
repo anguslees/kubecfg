@@ -11,9 +11,10 @@ clap = "2.18"
 json = "0.11"
 log = "0.3"
 env_logger = "0.3"
-hyper = "0.9"
+hyper = "0.10"
 yaml-rust = "0.3"
 error-chain = "0.7"
+url = "1.0"
 
 [dependencies.jsonnet-rs]
 version = "0.5"
