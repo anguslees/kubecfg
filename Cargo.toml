@@ -15,7 +15,4 @@ hyper = "0.10"
 yaml-rust = "0.3"
 error-chain = "0.7"
 url = "1.0"
-
-[dependencies.jsonnet-rs]
-version = "0.5"
-path = "../rust-jsonnet"
+jsonnet-rs = "0.5"
