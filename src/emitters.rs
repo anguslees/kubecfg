@@ -98,8 +98,8 @@ impl ::std::error::Error for YamlEmitError {
     }
 }
 
-impl ::std::fmt::Display for YamlEmitError {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl fmt::Display for YamlEmitError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use yaml_rust::EmitError;
         use ::std::error::Error;
         match self.0 {
