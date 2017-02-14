@@ -11,6 +11,7 @@ extern crate json;
 extern crate error_chain;
 extern crate hyper;
 extern crate url;
+extern crate hyper_native_tls;
 
 mod errors {
     error_chain! {
@@ -45,6 +46,8 @@ use jsonnet::{jsonnet_version,JsonnetVm};
 use url::Url;
 use hyper::Client;
 use hyper::header::{ContentType,Accept};
+use hyper::net::HttpsConnector;
+use hyper_native_tls::NativeTlsClient;
 use std::ffi::{OsStr,OsString};
 use std::io::{self,Write};
 use std::env;
@@ -339,7 +342,9 @@ fn main_() -> Result<()> {
     let server_url = Url::parse(matches.value_of("server").unwrap())
         .chain_err(|| "Invalid --server URL")?;
 
-    let client = Client::new();
+    let ssl = NativeTlsClient::new().unwrap();
+    let connector = HttpsConnector::new(ssl);
+    let client = Client::with_connector(connector);
 
     if let Some(ref matches) = matches.subcommand_matches("completions") {
         let shell = value_t!(matches, "shell", Shell)
