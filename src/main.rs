@@ -40,6 +40,7 @@ mod errors {
 
 mod emitters;
 mod kutils;
+mod diff;
 
 use clap::{Arg,App,SubCommand,AppSettings,Shell,ArgGroup,ArgMatches};
 use jsonnet::{jsonnet_version,JsonnetVm};
@@ -443,20 +444,21 @@ fn do_diff<'a,W>(c: &mut Context, matches: &ArgMatches<'a>, mut w: W) -> Result<
         info!("<= {}", resp.status);
 
         let existing = if resp.status == hyper::NotFound {
-            None
+            JsonValue::Null
         } else {
-            Some(kube_result(resp)?)
+            let mut v = kube_result(resp)?;
+            v.remove("status");
+            v
         };
 
-        let diffs = diff_walk(0, existing.as_ref(), Some(o));
-        for diff in diffs {
-            let indent: String = ::std::iter::repeat("  ")
-                .take(diff.depth as usize)
-                .collect();
-            writeln!(w, "{}{}{}",
-                     diff.dir.unidiff_prefix(),
-                     indent,
-                     diff.value)?;
+        let diffs = diff::diff_walk(0, &existing, o);
+        if !diffs.is_empty() {
+            writeln!(w, "--- old {}/{}", o.k8s_namespace(), o.k8s_name())?;
+            writeln!(w, "+++ new {}/{}", o.k8s_namespace(), o.k8s_name())?;
+            for diff in diffs {
+                trace!("Got diff: {:?}", diff);
+                writeln!(w, "{}", diff)?;
+            }
         }
     }
 
@@ -480,74 +482,6 @@ fn main() {
         }
 
         ::std::process::exit(1);
-    }
-}
-
-//  frob:
-// +  xyzzy
-//    foo:
-// +    bar:
-// +     subbar
-// -    baz
-
-#[derive(Debug,PartialEq,Clone,Copy)]
-enum DiffDir {
-    AOnly,
-    BOnly,
-    Both,
-}
-impl DiffDir {
-    fn unidiff_prefix(&self) -> &'static str {
-        match *self {
-            DiffDir::AOnly => "-",
-            DiffDir::BOnly => "+",
-            DiffDir::Both  => " ",
-        }
-    }
-}
-
-struct Diff<'a> {
-    dir: DiffDir,
-    depth: u16,
-    value: &'a json::JsonValue,
-}
-fn diff_walk<'a>(depth: u16, a: Option<&'a json::JsonValue>, b: Option<&'a json::JsonValue>) -> Vec<Diff<'a>> {
-    use std::collections::BTreeSet;
-    match (a, b) {
-        (None, None) => vec![],
-        (Some(a), None) =>
-            vec![Diff{dir: DiffDir::AOnly, depth: depth, value: a}],
-        (None, Some(b)) =>
-            vec![Diff{dir: DiffDir::BOnly, depth: depth, value: b}],
-        (Some(a), Some(b)) => {
-            if a.is_array() && b.is_array() {
-                unimplemented!()
-            } else if a.is_object() && b.is_object() {
-                let keys: BTreeSet<_> = a.entries()
-                    .chain(b.entries())
-                    .map(|v| v.0)
-                    .collect();
-                let mut keys: Vec<_> = keys.into_iter().collect();
-                keys.sort();
-
-                let mut diffs = vec![];
-                for k in keys {
-                    if !a.has_key(k) {
-                        diffs.push(Diff{dir: DiffDir::BOnly, depth: depth+1, value: &b[k]});
-                    } else if !b.has_key(k) {
-                        diffs.push(Diff{dir: DiffDir::AOnly, depth: depth+1, value: &a[k]});
-                    }
-                }
-                diffs
-            } else {
-                if a == b {
-                    vec![]
-                } else {
-                    vec![Diff{dir: DiffDir::AOnly, depth: depth, value: a},
-                         Diff{dir: DiffDir::BOnly, depth: depth, value: b}]
-                }
-            }
-        },
     }
 }
 
