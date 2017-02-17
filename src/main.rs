@@ -101,6 +101,7 @@ fn build_cli<'a>(version: &'a str) -> App<'a, 'a> {
         .subcommand(SubCommand::with_name("show")
                     .about("Show expanded resource definition")
                     .arg(Arg::with_name("format")
+                         .short("o")
                          .long("format")
                          .possible_values(&OutputFormat::variants())
                          .default_value(OutputFormat::default())
@@ -447,6 +448,7 @@ fn do_diff<'a,W>(c: &mut Context, matches: &ArgMatches<'a>, mut w: W) -> Result<
             JsonValue::Null
         } else {
             let mut v = kube_result(resp)?;
+            // TODO: more cleaning. `metadata.selfLink`, etc.
             v.remove("status");
             v
         };
