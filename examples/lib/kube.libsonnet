@@ -6,9 +6,6 @@
 // (client-side, and gives better line information).
 
 {
-  // Add additional metadata labels to `obj`
-  addLabels(obj, labels):: obj { metadata+: { labels+: labels } },
-
   // Returns array of values from given object.  Does not include hidden fields.
   objectValues(o):: [o[field] for field in std.objectFields(o)],
 
@@ -312,8 +309,8 @@
     },
   },
 
-  PetSet(name): $._Object("apps/v1alpha1", "PetSet", name) {
-    local petset = self,
+  StatefulSet(name): $._Object("apps/v1beta1", "StatefulSet", name) {
+    local sset = self,
 
     spec: {
       serviceName: name,
@@ -321,7 +318,7 @@
       template: {
         spec: $.PodSpec,
         metadata: {
-          labels: petset.metadata.labels,
+          labels: sset.metadata.labels,
           annotations: {},
         },
       },
