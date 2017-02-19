@@ -323,6 +323,9 @@
         },
       },
 
+      volumeClaimTemplates_: {}
+      volumeClaimTemplates: [$.PersistentVolumeClaim(kv[0]) + kv[1] for kv in $.objectItems(self.volumeClaimTemplates_)],
+
       replicas: 1,
       assert self.replicas >= 1,
     },
