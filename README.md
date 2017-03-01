@@ -1,6 +1,11 @@
 # kubecfg
 
-A tool for managing your Kubernetes application deployments as code.
+A tool for managing complex enterprise Kubernetes environments as code.
+
+kubecfg allows you to express the patterns across your infrastructure
+and reuse these powerful "templates" across many services.  The more
+complex you infrastructure is, the more you will gain from using
+kubecfg.
 
 Status: Basic functionality works, but there are still unimplemented
 features and arguments.  If the functionality you want works now, it
