@@ -24,7 +24,14 @@ mod errors {
                 description("Unknown output format")
                 display("Unknown output format: '{}'", v)
             }
-
+            UnknownResource(v: String) {
+                description("Unknown Kubernetes resource")
+                display("Unknown resource: '{}'", v)
+            }
+            MalformedObject(v: ::json::JsonValue) {
+                description("Unexpected JSON value")
+                display("Unexpected JSON value in {}", v.dump())
+            }
             Kubernetes(v: ::json::JsonValue) {
                 description("Error from Kubernetes server")
                 display("Error from Kubernetes: {}",
@@ -52,6 +59,7 @@ use hyper_native_tls::NativeTlsClient;
 use json::JsonValue;
 use std::ffi::OsStr;
 use std::io::{self,Write};
+use std::collections::BTreeMap;
 use std::env;
 
 use errors::*;
@@ -203,10 +211,139 @@ fn build_cli<'a>(version: &'a str) -> App<'a, 'a> {
                          .help("Input file")))
 }
 
+type ApiMap = BTreeMap<kutils::K8sKind, kutils::ApiResource>;
+
 struct Context {
     vm: JsonnetVm,
     server_url: Url,
     client: Client,
+    api_cache: ApiMap,
+}
+
+fn api_path_for_type(path: &mut url::PathSegmentsMut, map: &ApiMap, kind: &kutils::K8sKind, namespace: Option<&str>) -> Result<()> {
+    let api = map.get(kind)
+        .ok_or_else(|| ErrorKind::UnknownResource(format!("{}", kind)))?;
+
+    kind.api_version.path_segments(path);
+
+    match namespace {
+        Some(ns) if api.namespaced => {
+            path.push("namespaces");
+            path.push(ns);
+        }
+        _ => (),
+    };
+
+    path.push(&api.name);
+
+    Ok(())
+}
+
+fn api_path_for<'a>(path: &mut url::PathSegmentsMut, map: &'a ApiMap, o: &'a JsonValue) -> Result<()> {
+    let kind = o.k8s_kind();
+    api_path_for_type(path, map, &kind, o.k8s_namespace())
+}
+
+fn api_named_path_for<'a>(path: &mut url::PathSegmentsMut, map: &'a ApiMap, o: &'a JsonValue) -> Result<()> {
+    let name = o.k8s_name()
+        .ok_or_else(|| ErrorKind::MalformedObject(o.to_owned()))?;
+
+    api_path_for(path, map, o)?;
+    path.push(name);
+
+    Ok(())
+}
+
+#[test]
+fn test_api_paths() {
+    let mut map = ApiMap::new();
+    {
+        let kind = kutils::K8sKind::new("test/v0", "MyKind");
+        let res = kutils::ApiResource{
+            name: "mykinds".to_string(),
+            kind: "MyKind".to_string(),
+            namespaced: true,
+        };
+        map.insert(kind, res);
+    }
+
+    let mut url = Url::parse("http://dummy/").unwrap();
+    let json = object!{
+        "apiVersion" => "test/v0",
+        "kind" => "Unknown",
+        "metadata" => object!{
+            "name" => "foo",
+            "namespace" => "ns"
+        }
+    };
+    url.path_segments_mut().unwrap().clear();
+    assert!(api_named_path_for(&mut url.path_segments_mut().unwrap(), &map, &json)
+            .is_err());
+
+    let json = object!{
+        "apiVersion" => "test/v0",
+        "kind" => "MyKind",
+        "metadata" => object!{
+            "name" => "foo",
+            "namespace" => "myns"
+        }
+    };
+    url.path_segments_mut().unwrap().clear();
+    api_path_for(&mut url.path_segments_mut().unwrap(), &map, &json).unwrap();
+    assert_eq!(url.to_string(), "http://dummy/apis/test/v0/namespaces/myns/mykinds");
+
+    url.path_segments_mut().unwrap().clear();
+    api_named_path_for(&mut url.path_segments_mut().unwrap(), &map, &json).unwrap();
+    assert_eq!(url.to_string(), "http://dummy/apis/test/v0/namespaces/myns/mykinds/foo");
+}
+
+impl Context {
+    fn fetch_api_info(&mut self, api_version: &kutils::ApiVersion) -> Result<()> {
+        use std::collections::btree_map::Entry;
+
+        let mut url = self.server_url.clone();
+        api_version.path_segments(&mut url.path_segments_mut().unwrap());
+
+        info!("=> GET {}", url);
+        let req = self.client.get(url)
+            .header(Accept::json());
+
+        let resp = req.send()
+            .chain_err(|| "Error sending request")?;
+        info!("<= {}", resp.status);
+
+        let list = kube_result(resp)?;
+        let group_version = list["groupVersion"].as_str()
+            .ok_or_else(|| ErrorKind::MalformedObject(list.clone()))?;
+        for r in list["resources"].members() {
+            let api = kutils::ApiResource::new_from_json(r)?;
+            let kind = kutils::K8sKind::new(group_version, &api.kind);
+            match self.api_cache.entry(kind) {
+                Entry::Vacant(e) => { e.insert(api); },
+                Entry::Occupied(mut e) => {
+                    // Take the shortest name, in an attempt to find
+                    // the core CRUD endpoint
+                    if e.get().name.len() > api.name.len() {
+                        e.insert(api);
+                    }
+                },
+            };
+        }
+
+        Ok(())
+    }
+
+    fn url_for(&mut self, o: &JsonValue, named: bool) -> Result<Url> {
+        let kind = o.k8s_kind();
+        if !self.api_cache.contains_key(&kind) {
+            self.fetch_api_info(&kind.api_version)?;
+        }
+
+        let path_func = if named { api_named_path_for } else { api_path_for };
+        let mut url = self.server_url.clone();
+        path_func(&mut url.path_segments_mut().unwrap(), &self.api_cache, o)?;
+        Ok(url)
+    }
 }
 
 fn init_vm_options<'a>(vm: &mut JsonnetVm, matches: &ArgMatches<'a>) {
@@ -254,20 +391,19 @@ fn do_show<'a,W>(c: &mut Context, matches: &ArgMatches<'a>, w: W) -> Result<()>
 fn do_create<'a>(c: &mut Context, matches: &ArgMatches<'a>) -> Result<()> {
     init_vm_options(&mut c.vm, matches);
 
-    let filename = matches.value_of_os("file").unwrap();
-    let json = c.vm.evaluate_file(filename)
-        .map_err(|e| e.as_str().to_owned())?;
+    let parsed = {
+        let filename = matches.value_of_os("file").unwrap();
+        let json = c.vm.evaluate_file(filename)
+            .map_err(|e| e.as_str().to_owned())?;
 
-    let parsed = json::parse(&json)
-        .chain_err(|| "Unable to parse jsonnet output")?;
-
-    let objects = kutils::sort_for(kutils::Operation::Create, &parsed);
+        json::parse(&json)
+            .chain_err(|| "Unable to parse jsonnet output")?
+    };
+    let mut objects = kutils::flatten_list(&parsed);
+    objects.sort_by_key(|&v| kutils::dep_first(v));
 
     for o in objects {
-        let url_path = o.k8s_api_path();
-        let url = c.server_url
-            .join(&url_path)
-            .chain_err(|| "Unable to create URL")?;
+        let url = c.url_for(&o, false)?;
         let body = o.dump();
 
         // TODO: support --record?
@@ -291,14 +427,16 @@ fn do_create<'a>(c: &mut Context, matches: &ArgMatches<'a>) -> Result<()> {
 fn do_delete<'a>(c: &mut Context, matches: &ArgMatches<'a>) -> Result<()> {
     init_vm_options(&mut c.vm, matches);
 
-    let filename = matches.value_of_os("file").unwrap();
-    let json = c.vm.evaluate_file(filename)
-        .map_err(|e| e.as_str().to_owned())?;
+    let parsed = {
+        let filename = matches.value_of_os("file").unwrap();
+        let json = c.vm.evaluate_file(filename)
+            .map_err(|e| e.as_str().to_owned())?;
 
-    let parsed = json::parse(&json)
-        .chain_err(|| "Unable to parse jsonnet output")?;
+        json::parse(&json)
+            .chain_err(|| "Unable to parse jsonnet output")?
+    };
 
-    let objects = kutils::sort_for(kutils::Operation::Delete, &parsed);
+    let objects = kutils::flatten_list(&parsed);
 
     let options: JsonValue = {
         let mut o = kutils::DeleteOptions::default();
@@ -309,15 +447,15 @@ fn do_delete<'a>(c: &mut Context, matches: &ArgMatches<'a>) -> Result<()> {
             o.grace_period_seconds = Some(v);
         }
 
+        // Delete dependent objects automatically
+        o.orphan_dependents = false;
+
         o.into()
     };
     let body = options.dump();
 
     for o in objects {
-        let url_path = o.k8s_api_path_named();
-        let url = c.server_url
-            .join(&url_path)
-            .chain_err(|| "Unable to create URL")?;
+        let url = c.url_for(&o, true)?;
 
         info!("DELETE {}", url);
         let req = c.client.delete(url)
@@ -327,6 +465,7 @@ fn do_delete<'a>(c: &mut Context, matches: &ArgMatches<'a>) -> Result<()> {
 
         let resp = req.send()
             .chain_err(|| "Error sending request")?;
+        info!("<= {}", resp.status);
 
         kube_result(resp)?;
     }
@@ -336,44 +475,47 @@ fn do_delete<'a>(c: &mut Context, matches: &ArgMatches<'a>) -> Result<()> {
 
 fn do_update<'a>(c: &mut Context, matches: &ArgMatches<'a>) -> Result<()> {
     let creat = matches.is_present("create");
+    let wait = matches.is_present("wait");
 
     init_vm_options(&mut c.vm, matches);
 
-    let filename = matches.value_of_os("file").unwrap();
-    let json = c.vm.evaluate_file(filename)
-        .map_err(|e| e.as_str().to_owned())?;
+    let parsed = {
+        let filename = matches.value_of_os("file").unwrap();
+        let json = c.vm.evaluate_file(filename)
+            .map_err(|e| e.as_str().to_owned())?;
 
-    let parsed = json::parse(&json)
-        .chain_err(|| "Unable to parse jsonnet output")?;
+        json::parse(&json)
+            .chain_err(|| "Unable to parse jsonnet output")?
+    };
 
-    let objects = kutils::sort_for(kutils::Operation::Update, &parsed);
+    let mut objects = kutils::flatten_list(&parsed);
+    objects.sort_by_key(|&v| kutils::dep_first(v));
+
+    let mut wait_objects = Vec::new();
 
     for o in objects {
-        let url_path = o.k8s_api_path_named();
-        let url = c.server_url
-            .join(&url_path)
-            .chain_err(|| "Unable to create URL")?;
+        let url = c.url_for(&o, true)?;
 
         // TODO: set kubernetes.io/change-cause ?
         let body = o.dump();
 
         info!("=> PATCH {}", url);
-        let req = c.client.patch(url)
-            .header(ContentType("application/merge-patch+json".parse().unwrap()))
-            .header(Accept::json())
-            .body(&body);
+        let mut resp = {
+            let req = c.client.patch(url)
+                .header(ContentType("application/merge-patch+json".parse().unwrap()))
+                .header(Accept::json())
+                .body(&body);
 
-        let mut resp = req.send()
-            .chain_err(|| "Error sending request")?;
-        info!("<= {}", resp.status);
+            let resp = req.send()
+                .chain_err(|| "Error sending request")?;
+            info!("<= {}", resp.status);
+            resp
+        };
 
         if creat && resp.status == hyper::NotFound {
             // Not found => create
             info!("Creating {}", o.k8s_tname());
-            let url_path = o.k8s_api_path();
-            let url = c.server_url
-                .join(&url_path)
-                .chain_err(|| "Unable to create URL")?;
+            let url = c.url_for(&o, false)?;
 
             info!("=> POST {}", url);
             let req = c.client.post(url)
@@ -386,10 +528,36 @@ fn do_update<'a>(c: &mut Context, matches: &ArgMatches<'a>) -> Result<()> {
             info!("<= {}", resp.status);
         }
 
-        kube_result(resp)?;
+        let new_obj = kube_result(resp)?;
 
-        // TODO: Implement --wait.
         // TODO: (Optionally) Show diff between orig and server response
+
+        if wait && o.is_k8s_kind(kutils::V1BETA1_DEPLOYMENT) {
+            wait_objects.push(new_obj);
+        }
+    }
+
+    for o in wait_objects {
+        info!("Waiting for {}", o);
+
+        let mut keep_going = true;
+
+        while keep_going {
+            let mut url = c.url_for(&o, true)?;
+            url.query_pairs_mut().append_pair("watch", "true");
+
+            info!("=> GET {}", url);
+            let req = c.client.get(url)
+                .header(Accept::json());
+
+            let resp = req.send()
+                .chain_err(|| "Error sending request")?;
+            info!("<= {}", resp.status);
+
+            keep_going = kutils::kube_watch(resp, |o| {
+                Ok(!::kutils::is_rollout_done(&o))
+            })?
+        }
     }
 
     Ok(())
@@ -418,21 +586,21 @@ fn do_diff<'a,W>(c: &mut Context, matches: &ArgMatches<'a>, mut w: W) -> Result<
     init_vm_options(&mut c.vm, matches);
 
     let filename = matches.value_of_os("file").unwrap();
-    let json = c.vm.evaluate_file(filename)
-        .map_err(|e| e.as_str().to_owned())?;
+    let parsed = {
+        let json = c.vm.evaluate_file(filename)
+            .map_err(|e| e.as_str().to_owned())?;
 
-    let parsed = json::parse(&json)
-        .chain_err(|| "Unable to parse jsonnet output")?;
+        json::parse(&json)
+            .chain_err(|| "Unable to parse jsonnet output")?
+    };
 
-    let objects = kutils::sort_for(kutils::Operation::Alpha, &parsed);
+    let mut objects = kutils::flatten_list(&parsed);
+    objects.sort_by_key(|item| item.k8s_name());
 
     // TODO: optionally find everything else already in the namespace
 
     for o in objects {
-        let url_path = o.k8s_api_path_named();
-        let url = c.server_url
-            .join(&url_path)
-            .chain_err(|| "Unable to create URL")?;
+        let url = c.url_for(&o, true)?;
 
         info!("=> GET {}", url);
         let req = c.client.get(url)
@@ -453,8 +621,8 @@ fn do_diff<'a,W>(c: &mut Context, matches: &ArgMatches<'a>, mut w: W) -> Result<
 
         let diffs = diff::diff_walk(0, &existing, o);
         if !diffs.is_empty() {
-            writeln!(w, "--- old {}/{}", o.k8s_namespace(), o.k8s_name())?;
-            writeln!(w, "+++ new {}/{}", o.k8s_namespace(), o.k8s_name())?;
+            writeln!(w, "--- old {}/{}", o.k8s_namespace().unwrap_or_default(), o.k8s_name().unwrap_or_default())?;
+            writeln!(w, "+++ new {}/{}", o.k8s_namespace().unwrap_or_default(), o.k8s_name().unwrap_or_default())?;
             for diff in diffs {
                 trace!("Got diff: {:?}", diff);
                 writeln!(w, "{}", diff)?;
@@ -511,6 +679,7 @@ fn main_() -> Result<()> {
             vm: vm,
             server_url: server_url,
             client: client,
+            api_cache: BTreeMap::new(),
         }
     };
 
