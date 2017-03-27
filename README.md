@@ -7,14 +7,17 @@ and reuse these powerful "templates" across many services.  The more
 complex you infrastructure is, the more you will gain from using
 kubecfg.
 
-Status: Basic functionality works, but there are still unimplemented
-features and arguments.  If the functionality you want works now, it
-should continue to work going forward.
+Status: Basic create/delete/update/diff functionality works, but there are
+still some unimplemented features and arguments.  If the functionality you
+want works now, it should continue to work going forward.
 
 Yes, Google employees will recognise this as being very similar to a
 similarly-named internal tool ;)
 
 ## Install
+
+Pre-built x86_64 binaries are available in the
+[github releases page](https://github.com/anguslees/kubecfg/releases).
 
 Install Rust and cargo.  See https://www.rust-lang.org/install.html
 
