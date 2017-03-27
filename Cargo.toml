@@ -1,6 +1,6 @@
 [package]
 name = "kubecfg"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Angus Lees <gus@inodes.org>"]
 
 [profile.release]
