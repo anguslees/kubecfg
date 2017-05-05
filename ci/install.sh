@@ -22,6 +22,11 @@ main() {
            --git japaric/cross \
            --tag $tag \
            --target $target
+
+    # jsonnet-sys uses C++. Apparently this is unusual with musl.
+    case "$TARGET" in
+        *-musl) install -m 755 ci/musl-g++ $HOME/.cargo/bin/
+    esac
 }
 
 main
