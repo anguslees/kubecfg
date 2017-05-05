@@ -1,20 +1,89 @@
-language: rust
-rust:
-  - stable
-  - beta
-  - nightly
+# Based on the "trust" template v0.1.1
+# https://github.com/japaric/trust/tree/v0.1.1
 
-# Need semi-recent g++ (for jsonnet-sys)
+# NB: Need a semi-recent g++ (for jsonnet-sys)
 dist: trusty
-group: beta
-
-sudo: false
+language: rust
+services: docker
+sudo: required
 
 env:
-  - RUST_BACKTRACE=1
+  global:
+    - CRATE_NAME=kubecfg
+
+matrix:
+  include:
+    # Linux
+    - env: TARGET=i686-unknown-linux-gnu
+    - env: TARGET=i686-unknown-linux-musl
+    - env: TARGET=x86_64-unknown-linux-gnu
+    - env: TARGET=x86_64-unknown-linux-musl
+
+    # OSX
+    #- env: TARGET=i686-apple-darwin
+    #  os: osx
+    - env: TARGET=x86_64-apple-darwin
+      os: osx
+
+    # *BSD
+    #- env: TARGET=i686-unknown-freebsd DISABLE_TESTS=1
+    #- env: TARGET=x86_64-unknown-freebsd DISABLE_TESTS=1
+    #- env: TARGET=x86_64-unknown-netbsd DISABLE_TESTS=1
+
+    # Other architectures
+    - env: TARGET=aarch64-unknown-linux-gnu
+    - env: TARGET=armv7-unknown-linux-gnueabihf
+    #- env: TARGET=mips-unknown-linux-gnu
+    #- env: TARGET=mips64-unknown-linux-gnuabi64
+    #- env: TARGET=mips64el-unknown-linux-gnuabi64
+    #- env: TARGET=mipsel-unknown-linux-gnu
+    #- env: TARGET=powerpc-unknown-linux-gnu
+    #- env: TARGET=powerpc64-unknown-linux-gnu
+    #- env: TARGET=powerpc64le-unknown-linux-gnu
+    #- env: TARGET=s390x-unknown-linux-gnu DISABLE_TESTS=1
+
+    # Testing other channels
+    - env: TARGET=x86_64-unknown-linux-gnu
+      rust: nightly
+    - env: TARGET=x86_64-apple-darwin
+      os: osx
+      rust: nightly
+
+before_install: set -e
+
+install:
+  - sh ci/install.sh
+  - source ~/.cargo/env || true
+
 script:
-  - cargo build --verbose
-  - cargo test --verbose
+  - bash ci/script.sh
+
+after_script: set +e
+
+before_deploy:
+  - sh ci/before_deploy.sh
+
+deploy:
+  api_key:
+    secure: "y8Z8PoKz5eO/hvr7dRYWOepKkDNoNAwoOprsa/eqkRTGwY7OZY+0eqr+phw0tlX/j308N8ISFND6a96koLwYHTKU620tQgf+/zKbaL1vVsmiT+GJsXfuAsb4xaHVPlXlOYLVbQaSvut2b0ykmioeO0Hj7YB8xElVSoG/FUi0EIh6oAEwm4cfZqAvrjzt4vfLewV9GcgwSJtgTvvvq3jT38RnHdL+095sZvDz98moz/VvLnP0RznU4lEjIZgJdXb/tc0vUlFmQsTQfBaFJGTg4UGJaSrjJIhezcOcFBG1qUBybBuRjzrf6338Ioq35hs7YJUy4gGZXIa8U62vpVpuxEtZSm+arzQkwRiwA3gAbnzRYpg/9558dZiRxVmhKOeYnCjgU+uDM0vxNUwLseKN2Q9bmrwzE36eNyFOzkSoo8TOp0cf7sBt93Y7hS2RGWbyuJ4GvcXHeDHPacvQHSOHOnd2D5F9nqOpJjr6vKrO+Qe6iX0yvdjohOqHkmD482jZ0TEjBh25toKAzSq77mwk2fp5iAAQKrDX9cBILxou+FA2/Mvlaf56/RannEYxsd/jrqyrjMJ+aaGfFxfEznn1bmT05Lzrxq1hz24xDilOmBwFqqikj1YPCn82rkab6gABARE93nuix/FTSBx8hAmEWPiYvs7XvgB42aFKGb+tOrQ="
+  file_glob: true
+  file: $CRATE_NAME-$TRAVIS_TAG-$TARGET.*
+  on:
+    condition: $TRAVIS_RUST_VERSION = stable
+    tags: true
+  provider: releases
+  skip_cleanup: true
+
+cache: cargo
+before_cache:
+  # Travis can't cache files that are not readable by "others"
+  - chmod -R a+r $HOME/.cargo
+
+branches:
+  only:
+    # release tags
+    - /^v\d+\.\d+\.\d+.*$/
+    - master
 
 notifications:
   email:
