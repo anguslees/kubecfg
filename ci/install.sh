@@ -26,8 +26,6 @@ main() {
     # jsonnet-sys uses C++. Apparently this is unusual with musl.
     case "$TARGET" in
         *-musl)
-            apt-get -qy update
-            apt-get -qy install g++
             install -m 755 ci/musl-g++ $HOME/.cargo/bin/
             ;;
     esac
