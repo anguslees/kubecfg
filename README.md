@@ -2,6 +2,8 @@
 
 A tool for managing complex enterprise Kubernetes environments as code.
 
+**Note: Effort on this project has moved to [bitnami/kubecfg](https://github.com/bitnami/kubecfg)** (a golang rewrite, hence I haven't just transferred this repo)
+
 kubecfg allows you to express the patterns across your infrastructure
 and reuse these powerful "templates" across many services.  The more
 complex you infrastructure is, the more you will gain from using
