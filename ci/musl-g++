@@ -1,0 +1,6 @@
+#!/bin/sh
+
+REALGCC=c++
+export REALGCC
+
+exec musl-gcc "$@"
