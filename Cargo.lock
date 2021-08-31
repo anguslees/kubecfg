@@ -155,7 +155,7 @@ version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15abd780e45b3ea4f76b4e9a26ff4843258dd8a3eed2775a0e7368c2e7936c2f"
 dependencies = [
- "log",
+ "log 0.3.9",
  "regex",
 ]
 
@@ -211,7 +211,7 @@ checksum = "43a15e3273b2133aaac0150478ab443fb89f15c3de41d8d93d8f3bb14bf560f6"
 dependencies = [
  "httparse",
  "language-tags",
- "log",
+ "log 0.3.9",
  "mime",
  "num_cpus",
  "rustc-serialize",
@@ -292,7 +292,7 @@ dependencies = [
  "hyper-native-tls",
  "json",
  "jsonnet-rs",
- "log",
+ "log 0.4.14",
  "url",
  "yaml-rust",
 ]
@@ -323,9 +323,21 @@ checksum = "7fb9b38af92608140b86b693604b9ffcc5824240a484d1ecd4795bacb2fe88f3"
 
 [[package]]
 name = "log"
-version = "0.3.7"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5141eca02775a762cc6cd564d8d2c50f67c0ea3a372cbf1c51592b3e029e10ad"
+checksum = "e19e8d5c34a3e0e2223db8e060f9e8264aeeb5c5fc64a4ee9965c062211c024b"
+dependencies = [
+ "log 0.4.14",
+]
+
+[[package]]
+name = "log"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "matches"
@@ -354,7 +366,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5514f038123342d01ee5f95129e4ef1e0470c93bc29edf058a46f9ee3ba6737e"
 dependencies = [
- "log",
+ "log 0.3.9",
 ]
 
 [[package]]
