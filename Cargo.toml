@@ -7,7 +7,7 @@ authors = ["Angus Lees <gus@inodes.org>"]
 panic = "abort"
 
 [dependencies]
-clap = "2.34"
+clap = "4.0"
 json = "0.12.4"
 log = "0.4.21"
 env_logger = "0.3"
